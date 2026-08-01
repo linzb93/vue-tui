@@ -16,6 +16,7 @@ behind flags.
 - **Inline history** — `@vue-tui/runtime/inline` exports `Static`.
 - **Visibility** — host-based `v-show` for Box, top-level Text, inline Text, and single-root component chains; hidden subtrees stay mounted and reactive.
 - **Text colors** — `color="default"` / `backgroundColor="default"` select the terminal default per channel.
+- **Text alignment** — `textAlign="left | center | right"` aligns every physical line after wrapping or truncation.
 - **Box styles** — `alignContent`, `aspectRatio`, per-edge `borderColor`, `borderDimColor`, and `borderBackgroundColor`.
 - **Borders** — `borderStyle` accepts all eight `cli-boxes` frames or a complete custom frame object.
 - **Tooling bridges** — unsupported `@vue-tui/runtime/internal/devtools` and `/internal/testing` entries for the official Vite and testing packages; `/internal/testing` also provides the process-shared event sink used by real-terminal dev-server tests.
@@ -35,6 +36,7 @@ behind flags.
 - **Errors** — Vue component errors follow Vue; the hidden error boundary and error overview are gone. A commit failure enters only its own app's fatal lifecycle.
 - **Vite dev errors** — the official development connector keeps the user root mounted while showing compile, evaluation, or render errors. Fullscreen places the diagnostic over the viewport; Inline prints it after the current frame. Failed runner batches cannot report themselves as applied before their queued error arrives, duplicate reports from one edit collapse, retired hot contexts cannot mutate a later session, and a later valid edit recovers. Its dev-only render boundary runs after user boundaries, while production Vue error handling remains unchanged.
 - **Failed mounts** — Vue-side cleanup now matches Vue exactly. Runtime no longer patches `EffectScope.prototype` or writes `app._ceVNode`; the original error still rethrows and `waitUntilExit()` still rejects with it.
+- **Text measurement** — fractional Yoga constraints reconcile against the final parent content width, preventing stale blank rows and clipped glyphs.
 - **Console** — `patchConsole` stays default-on with `false` as the escape hatch; output is forwarded unfiltered.
 
 ### Removed

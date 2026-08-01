@@ -2,6 +2,7 @@ import { type ExtractPublicPropTypes, type PropType } from "vue";
 import type { Color } from "./color.ts";
 
 type TextColor = Color | "default";
+type TextAlign = "left" | "center" | "right";
 type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 const optionalBoolean = { type: Boolean as PropType<boolean | undefined>, default: undefined };
 
@@ -14,6 +15,7 @@ export const textProps = {
   underline: optionalBoolean,
   strikethrough: optionalBoolean,
   inverse: optionalBoolean,
+  textAlign: { type: String as PropType<TextAlign>, default: "left" },
   wrap: { type: String as PropType<WrapMode>, default: "wrap" },
 };
 

@@ -2,6 +2,7 @@ import { assertColor } from "./color.ts";
 import type { TextProps } from "./text-props.ts";
 
 const wrapModes = new Set(["wrap", "hard", "truncate", "truncate-middle", "truncate-start"]);
+const textAlignments = new Set(["left", "center", "right"]);
 
 function label(prop: string): string {
   return `<Text> prop "${prop}"`;
@@ -21,6 +22,14 @@ function assertTextColor(value: unknown, prop: string): void {
 
 export function assertTextValid(props: TextProps): true {
   const values = props as Record<string, unknown>;
+  const textAlign = values["textAlign"];
+  if (typeof textAlign !== "string") {
+    throw new TypeError(`${label("textAlign")} must be a string.`);
+  }
+  if (!textAlignments.has(textAlign)) {
+    throw new Error(`Unsupported ${label("textAlign")} value: ${JSON.stringify(textAlign)}.`);
+  }
+
   const wrap = values["wrap"];
   if (typeof wrap !== "string") {
     throw new TypeError(`${label("wrap")} must be a string.`);

@@ -67,3 +67,75 @@ test("childless <Text /> does not create a flex gap", async () => {
   );
   expect(lastFrame()).toBe("hello");
 });
+
+test("wraps against the rounded parent content width without a stale row", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={10}>
+          <Box flexBasis="42.5%" flexDirection="column">
+            <Text>build</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(lastFrame()).toBe("buil\nd\nafter");
+});
+
+test("keeps measurement and paint in sync from a fractional horizontal offset", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={10}>
+          <Box flexBasis="7.5%" flexShrink={0} />
+          <Box flexBasis="45%" flexDirection="column" flexShrink={0}>
+            <Text>123456</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(lastFrame()).toBe(" 1234\n 56\nafter");
+});
+
+test("does not clip text that rounds wider than an overflow-hidden parent", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={10}>
+          <Box flexBasis="7.5%" flexShrink={0}>
+            <Text>x</Text>
+          </Box>
+          <Box flexBasis="42.5%" flexDirection="column" flexShrink={0} overflow="hidden">
+            <Text>build</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(lastFrame()).toBe("xbuil\n d\nafter");
+});
+
+test("remeasures sub-cell constraints against their final one-cell parent", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={2}>
+          <Box flexBasis="25%" flexShrink={0} flexDirection="column" overflow="hidden">
+            <Text>012345</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(lastFrame()).toBe("0\n1\n2\n3\n4\n5\nafter");
+});

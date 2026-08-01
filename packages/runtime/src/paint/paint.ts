@@ -29,7 +29,7 @@ import {
 } from "../host/nodes.ts";
 import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
 import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
-import { attachYoga, detachYoga } from "../host/yoga.ts";
+import { attachYoga, detachYoga, getTextTerminalCellWidth } from "../host/yoga.ts";
 import { isContentLayoutGuarded } from "../host/layout-guards.ts";
 import type { InternalGeometryPaintFrame } from "../geometry/geometry-service.ts";
 import { assertPaintSurfaceSize } from "../numeric-limits.ts";
@@ -840,6 +840,7 @@ interface PreparedTextPaint {
 interface PreparedTextPaintCache extends PreparedTextPaint {
   readonly revision: number;
   readonly inheritedBg: string | undefined;
+  readonly textAlign: TextProps["textAlign"];
   readonly wrapWidth: number;
   readonly wrapMode: TextProps["wrap"];
   readonly terminalStyleKey: string;
@@ -847,17 +848,39 @@ interface PreparedTextPaintCache extends PreparedTextPaint {
 
 const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
 
+function alignTextLine(
+  line: string,
+  width: number,
+  textAlign: NonNullable<TextProps["textAlign"]>,
+  terminalStyle: TerminalStyle,
+  inheritedBg: string | undefined,
+): string {
+  const remaining = Math.max(0, width - stringWidth(line));
+  const leading =
+    textAlign === "right" ? remaining : textAlign === "center" ? Math.floor(remaining / 2) : 0;
+  const trailing = remaining - leading;
+
+  if (!inheritedBg) return " ".repeat(leading) + line;
+
+  const padProps: TextProps = { backgroundColor: inheritedBg };
+  const pad = (columns: number): string =>
+    columns === 0 ? "" : applyChalk(terminalStyle, " ".repeat(columns), padProps);
+  return pad(leading) + line + pad(trailing);
+}
+
 function prepareTextPaint(
   node: TuiText,
   terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
   wrapWidth: number,
 ): PreparedTextPaint {
+  const textAlign = node.props.textAlign;
   const wrapMode = node.props.wrap;
   const cached = preparedTextPaintCache.get(node);
   if (
     cached?.revision === node.textRevision &&
     cached.inheritedBg === inheritedBg &&
+    cached.textAlign === textAlign &&
     cached.wrapWidth === wrapWidth &&
     cached.wrapMode === wrapMode &&
     cached.terminalStyleKey === terminalStyle.cacheKey
@@ -866,20 +889,14 @@ function prepareTextPaint(
   }
 
   const text = inlineTextValue(renderTextWithInlineStyles(node, terminalStyle, inheritedBg));
-  const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap");
-  if (inheritedBg) {
-    const padProps: TextProps = { backgroundColor: inheritedBg };
-    for (let index = 0; index < wrapped.length; index++) {
-      const pad = wrapWidth - stringWidth(wrapped[index]!);
-      if (pad > 0) {
-        wrapped[index] = wrapped[index]! + applyChalk(terminalStyle, " ".repeat(pad), padProps);
-      }
-    }
-  }
+  const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap").map((line) =>
+    alignTextLine(line, wrapWidth, textAlign ?? "left", terminalStyle, inheritedBg),
+  );
   const prepared = { text, wrapped };
   const entry = {
     revision: node.textRevision,
     inheritedBg,
+    textAlign,
     wrapWidth,
     wrapMode,
     terminalStyleKey: terminalStyle.cacheKey,
@@ -1113,14 +1130,14 @@ function paintNode(
       // is resolved against this inherited bg inside applyOwnStyle
       // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
       // the node's whole children concatenation alongside its boolean styles.
-      // Wrap at the TRUE cell width (unclamped), matching Ink's paint, which wraps at
-      // getMaxWidth(yogaNode) — a value that can legitimately be 0 (flexBasis=0, width=0,
-      // width="0%"). At width 0, wrapText returns the leading-newline wrap "\nA" → ["", "A"],
-      // pushing the glyph onto its own SECOND row exactly as the measure func reported
-      // (height 2). Clamping this to 1 would re-collapse to ["A"] on the first row, where a
-      // row-sibling overwrites it (the text-drop bug). Fitting text is untouched: wrapText's
-      // fast-path returns it verbatim.
-      const wrapWidth = Math.floor(layout.width);
+      // Wrap at the whole-cell width the Text actually owns inside its Yoga
+      // parent. Measured nodes round outward, so their computed width can be
+      // one cell wider than the rounded parent content box; measurement and
+      // paint reconcile to this same value before we get here. The width can
+      // legitimately be 0 (flexBasis=0, width=0, width="0%"). At width 0,
+      // wrapText returns the leading-newline wrap "\nA" → ["", "A"], pushing
+      // the glyph onto its own second row exactly as measurement reported.
+      const wrapWidth = getTextTerminalCellWidth(node);
       const { text, wrapped } = prepareTextPaint(node, terminalStyle, inheritedBg, wrapWidth);
       // Skip writing empty text — matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;

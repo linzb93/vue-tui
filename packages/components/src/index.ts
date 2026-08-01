@@ -2,10 +2,12 @@ import NewlineSfc from "./newline/newline.vue";
 import ScrollBoxSfc from "./scroll-box/scroll-box.vue";
 import SpacerSfc from "./spacer/spacer.vue";
 import SpinnerSfc from "./spinner/spinner.vue";
+import TableSfc from "./table/table.vue";
 import type { PublicComponent, PublicLeafComponent } from "./public-component.ts";
 import type { NewlineProps } from "./newline/newline-props.ts";
 import type { ScrollBoxExpose, ScrollBoxProps } from "./scroll-box/scroll-box-props.ts";
 import type { SpinnerProps } from "./spinner/spinner-props.ts";
+import type { TableComponent } from "./table/table-props.ts";
 
 // Keep the public constructor independent from the Vue patch release used to
 // build this package. Generated DefineComponent arity is not a product API.
@@ -33,6 +35,28 @@ export const ScrollBox = ScrollBoxSfc as unknown as PublicComponent<
   ScrollBoxExpose
 >;
 export type { ScrollBoxProps, ScrollBoxExpose };
+
+/**
+ * Render object rows as a bordered, terminal-width-aware table.
+ *
+ * - Columns are inferred from the union of row keys when omitted.
+ * - Explicit columns are checked against the row type inferred from `data`.
+ * - Cells preserve hard line breaks and wrap within the containing layout.
+ * - Column alignment applies independently to every resulting physical line.
+ * - A column may select any Runtime Text wrap mode; the default is `wrap`.
+ * - Headers and cells accept structured Runtime Text presentation styles.
+ *
+ * @example Typed columns
+ * ```ts
+ * type Process = { pid: number; name: string };
+ * const columns = [
+ *   { key: "pid", align: "right" },
+ *   { key: "name", label: "Command", headerStyle: { bold: true } },
+ * ] satisfies TableColumn<Process>[];
+ * ```
+ */
+export const Table = TableSfc as unknown as TableComponent;
+export type { TableColumn, TableProps, TableTextStyle } from "./table/table-props.ts";
 
 /**
  * Animated loading indicator with an optional label.

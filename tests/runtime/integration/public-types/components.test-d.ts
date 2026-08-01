@@ -75,6 +75,7 @@ expectTypeOf<keyof TextProps>().toEqualTypeOf<
   | "underline"
   | "strikethrough"
   | "inverse"
+  | "textAlign"
   | "wrap"
 >();
 expectTypeOf<BoxProps["flexDirection"]>().toEqualTypeOf<
@@ -124,6 +125,7 @@ expectTypeOf<BoxProps["gap"]>().toEqualTypeOf<number | undefined>();
 expectTypeOf<TextProps["bold"]>().toEqualTypeOf<boolean | undefined>();
 expectTypeOf<TextProps["color"]>().toEqualTypeOf<Color | "default" | undefined>();
 expectTypeOf<TextProps["backgroundColor"]>().toEqualTypeOf<Color | "default" | undefined>();
+expectTypeOf<TextProps["textAlign"]>().toEqualTypeOf<"left" | "center" | "right" | undefined>();
 expectTypeOf<TextProps["wrap"]>().toEqualTypeOf<
   "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start" | undefined
 >();

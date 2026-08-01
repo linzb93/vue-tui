@@ -58,6 +58,7 @@ const STYLE_PROPS = new Set([
   "underline",
   "strikethrough",
   "inverse",
+  "textAlign",
   "wrap",
   // Border visual style — also a yoga prop (sets border widths); stored here
   // so the paint pass can look up borderStyle from el.props.
@@ -596,7 +597,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       } else if (STYLE_PROPS.has(key)) {
         // Vue patches a key removed from `v-bind` as `null`. For Text's
         // tri-state style channels, removal means "unspecified": colors and
-        // modifiers must inherit again, and wrap must return to its default.
+        // modifiers must inherit again, and textAlign / wrap must return to their defaults.
         // Keeping null would make the paint cascade treat the channel as an
         // explicit override and would send wrap through the truncation branch.
         const stored = el.type === "tui-text" && next === null ? undefined : next;

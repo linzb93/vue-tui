@@ -522,14 +522,12 @@ These divergences are deliberate, but they are not strict supersets and are not 
 driven by Vue's framework model or API conventions. vue-tui intentionally chooses a
 different runtime behavior, ownership rule, or out-of-contract handling.
 
-### Box keeps Ink's style grammar; Text already matched it
+### Box keeps Ink's style grammar; Text adds physical-line alignment
 
-[VOUCHED @hyfdev 2026-07-25]
-
-- **Ink:** `BoxProps` is `Except<Styles, 'textWrap'>` plus the three `aria-*` props. `TextProps` is `color`, `backgroundColor`, `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, `inverse`, `wrap`.
-- **vue-tui:** `TextProps` is those same nine fields — it was never a reduction. `BoxProps` now carries 62 fields and covers every Ink Box style except `display`, which Vue's `v-show` replaces. `borderStyle` accepts all eight `cli-boxes` frames plus a complete custom frame object. The `aria-*` props stay removed with the screen-reader experiment.
-- **Why:** the earlier narrowing described a public surface, not a capability: the renderer already implemented per-edge border color, dim and background, `alignContent`, `aspectRatio`, and every named frame, with Ink-parity comments. Only the prop declaration and its closed validator excluded them, so the "minimum" was costing authors real expressiveness — a two-tone frame or a focus-highlighted top edge needed nested Boxes — while buying no simplicity in the implementation. `display` remains the one deliberate omission because Vue already owns visibility.
-- **Boundary:** a custom frame must supply all eight corner and edge characters, and an unknown frame name is still rejected. This entry does not reopen `zIndex`, layers, opacity, markup, hyperlinks, or a broad `style` object — none of which exist in Ink either.
+- **Ink:** `BoxProps` is `Except<Styles, 'textWrap'>` plus the three `aria-*` props. `TextProps` is `color`, `backgroundColor`, `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, `inverse`, `wrap`; pinned v7.0.4 has no text-alignment prop.
+- **vue-tui:** `BoxProps` carries 62 fields and covers every Ink Box style except `display`, which Vue's `v-show` replaces. `TextProps` keeps Ink's nine fields and adds `textAlign` for left, center, or right alignment of every physical line after wrapping or truncation. `borderStyle` accepts all eight `cli-boxes` frames plus a complete custom frame object. The `aria-*` props stay removed with the screen-reader experiment.
+- **Why:** the Box expansion still follows the earlier finding that its narrowing described a public surface rather than a capability. Text alignment is a new deliberate divergence: a responsive multiline Table proved that Box can position a complete Text node but cannot align the node's individual wrapped lines. Ratatui and Rich place that operation in their text wrapping/rendering layers, and Runtime already owns the ANSI-aware physical lines and their terminal display widths.
+- **Boundary:** the outermost Text's `textAlign` governs its complete composed content; nested Text remains an inline style span without independent geometry. There is no full-justify mode or separate exported alignment type. A custom frame must still supply all eight corner and edge characters, and an unknown frame name is still rejected. This entry does not reopen `zIndex`, layers, opacity, markup, hyperlinks, or a broad `style` object. The earlier stamp was removed because the exact Text parity it covered no longer holds.
 
 ### `Static` rejects a true Fullscreen surface
 
@@ -616,6 +614,12 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   whenever its measure func happens to be invalidated. KEEP. [VOUCHED @hyfdev] Tests:
   `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's stale
   frame) and [`text-wrap-remeasure-matrix.test.tsx`](../../tests/runtime/integration/layout/text-wrap-remeasure-matrix.test.tsx) (the two public modes plus a private raw-host Vue-reactive suite covering the full retained 6-mode / 30-transition internal matrix; 16 transitions go RED without the fix).
+
+### Measured Text reconciles with its final parent content width
+
+- **Ink:** its measure callback wraps against Yoga's fractional pre-rounding width, while paint wraps against the integer computed width. Run-verified on pinned v7.0.4 with a 10-column row, a `flexBasis="42.5%"` column-direction Box, `Text("build")`, and a following `Text("after")`: Ink returns `"build\n\nafter"`. Yoga measures `build` at 4.25 columns as two rows, then rounds the measured Text node outward to 5 cells and paints `build` on one row, leaving the stale reserved row.
+- **vue-tui:** the first measure uses the smallest whole-cell width implied by the fractional constraint. After Yoga assigns integer cells, Runtime compares the measured line count with wrapping at the final parent content width and reruns layout only when they differ. The same fixture renders `"buil\nd\nafter"`: the rounded parent owns four cells, every glyph remains visible, and no stale row remains. A second fixture starts Text after a fractional sibling and hides overflow, covering the case where the measured child rounds one cell wider than its parent.
+- **Why:** Yoga 3.2.1 deliberately [rounds measured Text nodes outward](https://github.com/facebook/yoga/blob/v3.2.1/yoga/algorithm/PixelGrid.cpp#L95-L132), but its measure callback does not know the node's eventual absolute offset. That offset changes pixel-grid rounding, and a measured child can become wider than its rounded parent. No function of `availableWidth` alone can choose the final terminal width. Reconciliation makes the parent's whole-cell content box authoritative for both measured height and paint. [`text-measure-parity.test.tsx`](../../tests/runtime/integration/layout/text-measure-parity.test.tsx) covers an origin-aligned fraction, a fractional offset, an overflow-hidden parent, and a sub-cell constraint that becomes one terminal cell; each fails through a stale row or clipped glyph without reconciliation.
 
 ### Historical second-mount policy: an inert no-op on a live stdout
 

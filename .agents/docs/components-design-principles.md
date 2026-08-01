@@ -5,10 +5,10 @@
 > issue, not here. It records how components in `@vue-tui/components` should be _shaped_ and
 > _styled_, and the bar for adding one in the first place.
 >
-> **Status:** active — the package now ships `ScrollBox` and `Spinner` (see per-component
+> **Status:** active — the package now ships `ScrollBox`, `Spinner`, and `Table` (see per-component
 > records below). The principles here are design intent for the package as a whole.
 >
-> **Per-component records:** [scroll-box](./components/scroll-box.md), [spinner](./components/spinner.md).
+> **Per-component records:** [scroll-box](./components/scroll-box.md), [spinner](./components/spinner.md), [table](./components/table.md).
 
 **The governing idea:** components in `@vue-tui/components` are **pure compositions of
 `@vue-tui/runtime` primitives**. The runtime owns the terminal-I/O and layout/commit boundary;
