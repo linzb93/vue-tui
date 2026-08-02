@@ -19,7 +19,8 @@ export type { Color } from "./components/color.ts";
  *   renderable.
  * - Nested spans inherit per channel; `color="default"` resets only that channel.
  * - The six modifiers are three-state: omitted inherits, `true` on, `false` off.
- * - The outermost `wrap` governs composed content.
+ * - The outermost `textAlign` and `wrap` govern composed content; alignment is
+ *   applied to every physical line after wrapping or truncation.
  *
  * @example Compose styled spans
  * ```tsx

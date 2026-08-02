@@ -74,6 +74,7 @@ const completeBox = (
       underline
       strikethrough
       inverse
+      textAlign="right"
       wrap="hard"
     >
       text
@@ -99,9 +100,12 @@ const staticContent = (
 const percentageHeight = <Box height="100%" />;
 // @ts-expect-error The supported end-truncation spelling is `truncate`.
 const invalidWrap = <Text wrap="truncate-end">text</Text>;
+// @ts-expect-error Text alignment is horizontal, not a flex alignment value.
+const invalidTextAlign = <Text textAlign="flex-end">text</Text>;
 
 void completeBox;
 void textWrapModes;
 void staticContent;
 void percentageHeight;
 void invalidWrap;
+void invalidTextAlign;

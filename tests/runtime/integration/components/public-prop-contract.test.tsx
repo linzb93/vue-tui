@@ -258,6 +258,13 @@ test("removes the truncate-end alias", () => {
   expect(() => renderText({ wrap: "truncate-end" })).toThrow(/<Text> prop "wrap"/);
 });
 
+test("accepts the three text alignments and rejects other values", () => {
+  for (const textAlign of ["left", "center", "right"]) {
+    expect(() => renderText({ textAlign })).not.toThrow();
+  }
+  expect(() => renderText({ textAlign: "justify" })).toThrow(/<Text> prop "textAlign"/);
+});
+
 test.each([
   ["Box", "display"],
   ["Box", "style"],

@@ -18,6 +18,7 @@ export interface TextProps {
   underline?: boolean;
   strikethrough?: boolean;
   inverse?: boolean;
+  textAlign?: "left" | "center" | "right";
   wrap?: "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 }
 

@@ -1,6 +1,7 @@
 import Yoga from "yoga-layout";
 import type { Direction, Node as YogaNode } from "yoga-layout";
 import type { TuiBox, TuiNode, TuiRoot, TuiStatic, TuiText } from "./nodes.ts";
+import { reconcileTextMeasurementWidth } from "./yoga.ts";
 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic;
@@ -68,7 +69,7 @@ function hideYogaChild(child: TuiNode, guarded: Map<YogaNode, number>): boolean 
 function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): boolean {
   if (hasYoga(node) && node.yoga.getDisplay() === Yoga.DISPLAY_NONE) return false;
 
-  let changed = false;
+  let changed = node.type === "tui-text" && reconcileTextMeasurementWidth(node);
   if (node.type === "tui-box") {
     const inner = getBoxInnerSize(node);
     if (inner.width === 0 || inner.height === 0) {

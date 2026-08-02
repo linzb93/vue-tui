@@ -35,6 +35,7 @@ import { Static } from "@vue-tui/runtime/inline";
       underline
       strikethrough
       inverse
+      text-align="right"
       wrap="hard"
     >
       narrowed props
@@ -63,6 +64,8 @@ import { Static } from "@vue-tui/runtime/inline";
   <Text color="grey">x</Text>
   <!-- @vue-expect-error duplicate end-truncation spelling is not public -->
   <Text wrap="truncate-end">x</Text>
+  <!-- @vue-expect-error Text alignment accepts only left, center, or right -->
+  <Text text-align="justify">x</Text>
   <!-- @vue-expect-error legacy foreground reset aliases were replaced by `default` -->
   <Text color="revert">x</Text>
   <!-- @vue-expect-error legacy foreground reset aliases were replaced by `default` -->

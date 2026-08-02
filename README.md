@@ -113,7 +113,7 @@ createApp(App).mount({ exitOnCtrlC: true });
 | [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | Reusable public-Runtime-only behavior — lifecycle-scoped input as a function-ref composable or renderless component.                                                                                                                                                                                            |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`pnpm dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                 |
-| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — `<ScrollBox>`, `<Spinner>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                                                                |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — `<ScrollBox>`, `<Spinner>`, `<Table>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                                                     |
 
 ## Examples
 
@@ -140,7 +140,7 @@ renderer-owned facts. [Package guide](./packages/runtime).
 
 `Box` and `Text` have closed prop surfaces: unknown props, misspellings, browser attributes, and listeners such as `@click` are rejected at runtime instead of silently ignored. The full prop tables are in the [Runtime guide](./packages/runtime/README.md#components).
 
-`v-show` belongs to the visual host layer rather than to a component allowlist. Vue forwards it through any chain of components whose current effective root is one `Box` or `Text`, so ordinary custom single-root components and the first-party `Newline`, `Spacer`, `Spinner`, and `ScrollBox` inherit it without dedicated support code. Fragment and text roots keep Vue's development warning and ineffective behavior, Comment roots are silently ineffective, and `Static` remains the explicit history-boundary exception.
+`v-show` belongs to the visual host layer rather than to a component allowlist. Vue forwards it through any chain of components whose current effective root is one `Box` or `Text`, so ordinary custom single-root components and the first-party `Newline`, `Spacer`, `Spinner`, `ScrollBox`, and non-empty `Table` inherit it without dedicated support code. An empty `Table` with no explicit columns renders no host node or layout space. Fragment and text roots keep Vue's development warning and ineffective behavior, Comment roots are silently ineffective, and `Static` remains the explicit history-boundary exception.
 
 `Static` is the only export on that subpath, and it is deliberately absent from the package root. It has no collection API — use ordinary Vue iteration with stable keys. Each instance commits its output once and then releases its subtree; effective Fullscreen rejects `Static`.
 
@@ -210,6 +210,7 @@ separately so the core stays small. [Package guide](./packages/components).
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [`<ScrollBox>`](./packages/components/src/scroll-box/scroll-box.vue) | Bounded sticky-bottom viewport; the app drives scrolling through its imperative handle |
 | [`<Spinner>`](./packages/components/src/spinner/spinner.vue)         | Animated loading spinner — `dots` / `line` presets or custom frames, optional label    |
+| [`<Table>`](./packages/components/src/table/table.vue)               | Non-interactive, terminal-width-aware bordered table for typed object rows             |
 | [`<Newline>`](./packages/components/src/newline/newline.vue)         | Emits `count` newline characters inside a `<Text>`                                     |
 | [`<Spacer>`](./packages/components/src/spacer/spacer.vue)            | A growing `Box` that fills the free main-axis space                                    |
 

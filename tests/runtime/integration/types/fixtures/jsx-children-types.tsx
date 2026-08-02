@@ -35,6 +35,7 @@ export const accepted = [
     underline
     strikethrough
     inverse
+    textAlign="right"
     wrap="hard"
   >
     narrowed text props
@@ -83,6 +84,8 @@ export const rejected = [
   <Text color="grey">x</Text>,
   // @ts-expect-error duplicate end-truncation spelling is not public
   <Text wrap="truncate-end">x</Text>,
+  // @ts-expect-error Text alignment accepts only left, center, or right
+  <Text textAlign="justify">x</Text>,
   // @ts-expect-error legacy foreground reset aliases were replaced by `default`
   <Text color="revert">x</Text>,
   // @ts-expect-error legacy foreground reset aliases were replaced by `default`
