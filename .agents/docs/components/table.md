@@ -1,124 +1,44 @@
-# Table — decision record
+# Table
 
-> Decisions specific to `@vue-tui/components`' `Table`. Shared conventions live in
-> [components-design-principles.md](../components-design-principles.md). Tracking: #224.
+`Table` is the non-interactive tabular data display in `@vue-tui/components`. Tracking: #224 and #244.
 
-`Table` renders tabular data with Unicode box-drawing borders, auto-derived or explicit column
-configuration, and two scoped slots for cell customization. It is generic over the row type `T`,
-inferred from the `data` prop — slot props (`row`, `value`, `column`) are typed accordingly.
+## Why it is first-party
 
-## Package placement
+The contributor had already converted a table component for Vue and reported a concrete terminal-correctness failure: Chinese headers did not align with their cells. The maintainer accepted that as a legitimate use and opened #224 for the contribution ([issue #221 context](https://github.com/vuejs-ai/vue-tui/issues/221#issuecomment-4824549966)). This is real consumer evidence for a recurring display need in the monitoring and data-workbench scenarios, not catalog parity with another framework. The generic non-interactive formatter belongs in `@vue-tui/components`; application data models and interactive sorting, selection, filtering, or navigation policy do not.
 
-- `Table` lives in `@vue-tui/components`, not `@vue-tui/runtime`.
-- It is a pure composition of runtime primitives: `<Box>`, `<Text>`, and the internal `Scalar` /
-  `ScalarDict` types (these are local to `table-props.ts` and not exported from the package).
-- It does not import `@vue-tui/runtime/internal`. Cell width measurement uses the external
-  `string-width` package (already a runtime dependency) for correct CJK / emoji / multi-byte
-  character handling.
+## Accepted first API
 
-## Generic row type
+The initial component accepts `data`, `columns`, and `padding`; each column may choose a Runtime `Text` wrap mode, physical-line alignment, string formatting, and structured header or cell text styles. A non-empty grid renders as real Runtime column-direction `Box` cells containing stretched `Text`, so Yoga supplies each Text with the complete responsive cell width and keeps borders aligned as logical rows grow. Runtime `textAlign` then aligns every wrapped or hard-newline line against that width. It has no sorting, selection, explicit column sizing, table-wide color props, header slot, cell slot, or border slot.
 
-`Table` is generic over the row type `T` (defaults to `ScalarDict`). The generic is inferred
-from the `data` prop and flows into scoped slots (`row`, `value`, `column`) and the `columns`
-prop.
+The narrow surface is deliberate. Table owns the text and the shared column geometry; arbitrary rendered slot content has no synchronous intrinsic-measurement contract that could keep every row on the same column boundaries. Slots and interaction can be added later from concrete product use cases without making border internals, provisional frames, or duplicate slot evaluation part of the first public contract.
 
-`ColumnConfig` itself is intentionally non-generic (`key: string`) to avoid TypeScript
-invariance from `keyof T`. The row-type-specific key narrowing is applied via the intersection
-type `ColumnConfigTyped<T> = ColumnConfig & { key: keyof T & string }`, used in `TableProps<T>`
-and `defineTableColumns<T>`.
+## Structured text styling
 
-The SFC itself uses plain `<script setup lang="ts">` (no `generic` attribute) — generic
-inference is provided entirely at the export site via `as unknown as`, following the same
-pattern as `<Static>` in `@vue-tui/runtime`:
+Per-cell and per-header text styling extends the column model without opening a Vue slot or allowing arbitrary rendered content to participate in table geometry. `format(value, row)` remains a text formatter that returns only `string`; it does not return VNodes, ANSI-marked strings, or a union of text and presentation objects. A column instead has `cellStyle`, accepting either a fixed `TableTextStyle` or a callback whose `value` retains the key-specific type, plus a fixed `headerStyle` for that column.
 
-- `table-props.ts` exports `TableProps<T>` and `defineTableColumns<T>` (both generic),
-  plus internal types `ColumnConfig`, `ColumnConfigBase`, `ColumnConfigTyped<T>`,
-  `TableDefaultSlotProps<T>`, and `TableHeaderSlotProps<T>`.
-- `index.ts` imports the SFC and casts it: `TableSfc as unknown as { new <T>(): { … } }`.
-  The cast **replaces** the SFC's type rather than intersecting it, because a `.vue` with
-  scoped slots emits a `__VLS_WithSlots` construct signature with non-generic slot types
-  that would block `T` inference.
-- Only `Table`, `TableProps`, and `defineTableColumns` are re-exported from the package
-  barrel — the remaining types flow implicitly through generics.
+`TableTextStyle` is `Readonly<Omit<TextProps, "textAlign" | "wrap">>`, covering foreground and background color, dim, bold, italic, underline, strikethrough, and inverse without exposing layout or arbitrary children. Table applies these structured values through nested public Runtime `<Text>` spans, so the render session remains the sole owner of color capability and ANSI generation. A background style covers the formatted text only; cell padding and borders remain structural Table output and are not styled by `TableTextStyle`.
 
-Consumer code benefits without any extra annotation:
+This extension deliberately does not re-export Chalk, add a general string-color helper, or restore the contributor's slots. A general slot cannot enforce that callers preserve measured text and shared column geometry; re-exported or helper-generated ANSI would keep ordinary data and presentation markup in the same `string` channel. Labels and formatter output instead remain plain text. An actual ESC or other terminal-control byte is not a styling API and is rejected; callers that need to display one encode it visibly as `\\u001b`, `\\x1b`, or `␛`.
 
-```tsx
-const data = [{ name: "Alice", age: 30 }];
-<Table data={data}>
-  {{
-    default: ({ row, value }) => {
-      // row: { name: string; age: number }
-      // value: string | number
-    },
-  }}
-</Table>;
-```
+## Row and column types
 
-## Column configuration
+`Table` infers one row type from `data`. `TableColumn<Row>` is a distributive mapped union over the row's string keys, so heterogeneous row unions retain every possible key; a formatter receives `undefined` when its key is absent from one union member. Each column key must exist and its optional `format(value, row)` callback otherwise receives the value type for that key. `columns` uses `NoInfer<Row>` so a misspelled key cannot widen the row inferred from `data`.
 
-- **Auto-derived (zero-config):** when `columns` is omitted, the component collects the union of
-  all keys from `props.data` and uses each key as both the column label and accessor. This makes
-  simple datasets render without any column boilerplate.
-- **Explicit `ColumnConfig[]`:** each column specifies `label` (header text) and `key` (data
-  accessor), plus optional `align`, `headerFormatter`, and `headerColor`.
-- **`defineTableColumns(cols)`** is a passthrough identity helper that enables TypeScript
-  excess-property checking on column config arrays — catching typos like `align2` at compile time.
-  It is generic over the row type `T` so keys are constrained to actual data keys. It is the
-  recommended way to define column arrays in consumer code.
+Extracted column arrays use TypeScript's `satisfies readonly TableColumn<Row>[]`; there is no identity helper. Both TSX and Vue-template fixtures verify accepted usage and rejected keys.
 
-## Slot design
+## Rendering contract
 
-Two scoped slots cover cell rendering. Border characters are always rendered directly
-(not customizable via slots). Each slot receives pre-computed, already-padded strings —
-custom renderers do not need to re-implement alignment or layout logic.
+- Omitted columns are derived from the union of enumerable string keys in first-seen order.
+- Explicit columns define order and may set `label`, `align`, `wrap`, `format`, `headerStyle`, and `cellStyle`; alignment applies to every physical line produced by hard breaks or wrapping, while styles apply only to text.
+- Natural column width is the maximum terminal display width of every physical header and formatted-cell line, plus `padding` on each side. `string-width` handles wide Unicode characters.
+- `padding` defaults to `1` and must be a non-negative safe integer.
+- `null` and `undefined` are blank. Strings, numbers, bigints, booleans, and symbols render directly. Objects and functions require `format` rather than silently rendering JavaScript's default object string.
+- CRLF, CR, LF, and Unicode line separators are normalized to hard LF breaks. Other C0/C1 terminal controls are rejected; structured component props, not control bytes in strings, own presentation.
+- Cells default to Runtime's `wrap` behavior. A column may instead choose `hard`, `truncate`, `truncate-middle`, or `truncate-start`. Yoga shrinks naturally wider columns proportionally when the grid exceeds its parent, and a logical row grows to the tallest resulting cell while shared borders remain aligned.
+- A natural grid wider than 65,535 terminal columns is rejected before creating layout nodes. If the parent is narrower than the structural minimum required by borders, configured padding, and one content cell per column, normal overflow clipping is the final fallback because a complete grid cannot fit.
+- Rows are separated by Unicode box-drawing lines. Empty data with explicit columns renders the header; empty data without columns renders no host node or layout space.
+- The first API has no slot contract. Unsupported child content is not interpreted as table data or geometry.
 
-| slot      | scope                                                        | covers                                        |
-| --------- | ------------------------------------------------------------ | --------------------------------------------- |
-| `header`  | `{ text, column, columnIndex, width }`                       | Header cells, one slot invocation per column. |
-| _default_ | `{ text, value, column, columnIndex, width, row, rowIndex }` | Data cells, one slot invocation per cell.     |
+## Package boundary
 
-### `header` slot
-
-Receives the already-padded, already-formatted header text plus the source `ColumnConfig`. The
-default rendering applies bold + blue (or the column's `headerColor`). Using this slot disables
-both the default bold-blue style and the `headerColor` prop for that column.
-
-### Default slot
-
-Receives the already-padded cell text, the raw `value`, the `ColumnConfig`, and the full `row`
-object with its `rowIndex`. The default rendering is plain `<Text>`. Common customizations:
-value-specific coloring (e.g. red for negative numbers), truncation with ellipsis, or interactive
-elements.
-
-## Width calculation & alignment
-
-- Column widths are computed as `max(headerWidth, ...dataWidths) + padding * 2`, where widths are
-  measured with `string-width`.
-- `padding` (default `1`) adds that many spaces on each side of every cell.
-- Alignment (`left` | `center` | `right`, default `left`) controls how the text is positioned
-  within the padded cell width. Padding spaces are always outside the alignment region — `left`
-  pads the right side, `right` pads the left side, `center` splits evenly.
-
-## `headerColor`
-
-- Each column can specify a `headerColor` (string, any terminal-supported color name). Defaults to
-  `"blue"` when omitted.
-- Has no effect when the `header` slot is used — the slot fully owns header rendering.
-- Applies to both plain headers (bold + color) and headerFormatter-produced headers (color only,
-  no bold — the headerFormatter owns the text content).
-
-## Null / undefined handling
-
-Cells with `null` or `undefined` values render as blank (whitespace only). They are never rendered
-as the string `"null"` or `"undefined"`. This matches the expectation that missing data should be
-visually empty, not display a type name.
-
-## Non-goals
-
-- **Sorting, filtering, row selection** — interactive table features are deferred to future work.
-  Table is a data-display component; interactivity belongs in a separate issue.
-- **Column resizing** — column widths are computed from content, not user-adjustable.
-- **Multi-line cells** — each row is exactly one terminal line tall. Newline characters in cell
-  values are stripped before rendering to prevent broken table layout. Content that exceeds the
-  column width is not wrapped or truncated by default.
+The component imports only the public Runtime `Box`, `Text`, `BoxProps`, and `TextProps` surface plus `string-width`; it does not depend on Runtime internals or read terminal globals. Its public constructor hides Vue's generated patch-specific SFC type, matching the other components package exports. Runtime behavior tests live under `packages/components/tests/table/`; implementation files remain under `src/table/`.

@@ -1,27 +1,113 @@
-export { default as ScrollBox } from "./scroll-box/scroll-box.vue";
-export type { ScrollBoxProps, ScrollBoxExpose } from "./scroll-box/scroll-box-props.ts";
-export { default as Spinner } from "./spinner/spinner.vue";
-export type { SpinnerProps } from "./spinner/spinner-props.ts";
+import NewlineSfc from "./newline/newline.vue";
+import ScrollBoxSfc from "./scroll-box/scroll-box.vue";
+import SpacerSfc from "./spacer/spacer.vue";
+import SpinnerSfc from "./spinner/spinner.vue";
 import TableSfc from "./table/table.vue";
-import type { TableDefaultSlotProps, TableHeaderSlotProps } from "./table/table-props.ts";
-import type { ScalarDict, TableProps } from "./table/table-props.ts";
+import type { PublicComponent, PublicLeafComponent } from "./public-component.ts";
+import type { NewlineProps } from "./newline/newline-props.ts";
+import type { ScrollBoxExpose, ScrollBoxProps } from "./scroll-box/scroll-box-props.ts";
+import type { SpinnerProps } from "./spinner/spinner-props.ts";
+import type { TableComponent } from "./table/table-props.ts";
 
-// Table exposes typed scoped slots: the default slot receives `{ text, value,
-// column, columnIndex, width, row, rowIndex }` with `row` / `value` / `column`
-// inferred from `data: T[]`. `as unknown as` REPLACES the SFC's type rather than
-// intersecting it: a `.vue` with a scoped `<slot>` emits an extra
-// `__VLS_WithSlots` construct signature that bakes NON-generic slot types which
-// would block `T` inference. A clean generic construct signature is all
-// JSX/template resolution needs — same pattern as `Static` in @vue-tui/runtime.
-export const Table = TableSfc as unknown as {
-  new <T = ScalarDict>(): {
-    $props: TableProps<T>;
-    $slots: {
-      default?: (props: TableDefaultSlotProps<T>) => unknown;
-      header?: (props: TableHeaderSlotProps<T>) => unknown;
-    };
-  };
-};
-export type { TableProps };
+// Keep the public constructor independent from the Vue patch release used to
+// build this package. Generated DefineComponent arity is not a product API.
+/**
+ * Bounded viewport that follows the bottom of its content until scrolled away.
+ *
+ * - No props. Drive it through the `ScrollBoxExpose` handle; each method returns
+ *   whether the top line changed.
+ * - Passive by design: no wheel or keyboard handling, so wire your own
+ *   `useInput()`. Mouse listener props are rejected.
+ *
+ * @example Scroll with the arrow keys
+ * ```tsx
+ * const view = shallowRef<ScrollBoxExpose | null>(null);
+ * useInput((event) => {
+ *   if (event.type !== "key") return;
+ *   if (event.key.name === "up") view.value?.scrollByLines(-1);
+ *   if (event.key.name === "down") view.value?.scrollByLines(1);
+ * });
+ * return () => <ScrollBox ref={view}><Log /></ScrollBox>;
+ * ```
+ */
+export const ScrollBox = ScrollBoxSfc as unknown as PublicComponent<
+  ScrollBoxProps,
+  ScrollBoxExpose
+>;
+export type { ScrollBoxProps, ScrollBoxExpose };
 
-export { defineTableColumns } from "./table/table-props.ts";
+/**
+ * Render object rows as a bordered, terminal-width-aware table.
+ *
+ * - Columns are inferred from the union of row keys when omitted.
+ * - Explicit columns are checked against the row type inferred from `data`.
+ * - Cells preserve hard line breaks and wrap within the containing layout.
+ * - Column alignment applies independently to every resulting physical line.
+ * - A column may select any Runtime Text wrap mode; the default is `wrap`.
+ * - Headers and cells accept structured Runtime Text presentation styles.
+ *
+ * @example Typed columns
+ * ```ts
+ * type Process = { pid: number; name: string };
+ * const columns = [
+ *   { key: "pid", align: "right" },
+ *   { key: "name", label: "Command", headerStyle: { bold: true } },
+ * ] satisfies TableColumn<Process>[];
+ * ```
+ */
+export const Table = TableSfc as unknown as TableComponent;
+export type { TableColumn, TableProps, TableTextStyle } from "./table/table-props.ts";
+
+/**
+ * Animated loading indicator with an optional label.
+ *
+ * - `type` picks a preset (default `"dots"`); `frames` replaces it with custom
+ *   frames.
+ * - The timer runs from mount to unmount, so `v-if` is how you pause it.
+ *
+ * @example Preset with a label
+ * ```vue
+ * <Spinner label="Building" color="cyan" />
+ * ```
+ *
+ * @example Custom frames
+ * ```vue
+ * <Spinner :frames="['<', '^', '>', 'v']" :interval="120" />
+ * ```
+ */
+export const Spinner = SpinnerSfc as unknown as PublicLeafComponent<SpinnerProps>;
+export type { SpinnerProps };
+
+/**
+ * Emit newline characters inside a `<Text>`.
+ *
+ * - Produces characters, not layout — it must sit inside a `<Text>`.
+ * - For space between boxes prefer Box `margin` or `gap`, which layout can reason
+ *   about.
+ *
+ * @example Separate two paragraphs
+ * ```vue
+ * <Text>
+ *   First<Newline :count="2" />Second
+ * </Text>
+ * ```
+ */
+export const Newline = NewlineSfc as unknown as PublicLeafComponent<NewlineProps>;
+export type { NewlineProps };
+
+/**
+ * A growing `Box` that eats the free space along the main axis.
+ *
+ * - Exactly `<Box flexGrow={1} />`, named for intent. No props.
+ * - Follows the parent's `flexDirection`.
+ *
+ * @example Push a status to the right edge
+ * ```tsx
+ * <Box width="100%">
+ *   <Text>file.ts</Text>
+ *   <Spacer />
+ *   <Text color="green">saved</Text>
+ * </Box>
+ * ```
+ */
+export const Spacer = SpacerSfc as unknown as PublicLeafComponent<Record<string, never>>;

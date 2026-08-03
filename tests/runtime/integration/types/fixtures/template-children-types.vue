@@ -1,0 +1,75 @@
+<script setup lang="ts">
+// Type-only fixture (not run): pins that consumer TEMPLATES type-check vue-tui
+// components under vue-tsc — props validated, slot children accepted — with the
+// components exported as WithChildren-wrapped defineComponents.
+//
+// Scope note: Vue templates allow undeclared component attributes as possible
+// fallthrough input, so a fat-fingered `<Box :bogusprop="1">` is not reliably a
+// template diagnostic. The `.tsx` fixture catches excess props, while Runtime's
+// closed Box/Text attribute check rejects every compiled-template remainder before
+// creating a terminal node.
+import { Box, Text } from "@vue-tui/runtime";
+import { Static } from "@vue-tui/runtime/inline";
+</script>
+
+<template>
+  <!-- Valid: slot children + typed props -->
+  <Box flex-direction="row"><Text color="green">ok</Text></Box>
+  <Box
+    flex-direction="column"
+    align-items="stretch"
+    justify-content="space-between"
+    width="55.9%"
+    :height="2"
+    :padding-left="1"
+    border-style="single"
+    border-color="gray"
+    overflow-y="hidden"
+  >
+    <Text
+      color="default"
+      background-color="default"
+      dim-color
+      bold
+      italic
+      underline
+      strikethrough
+      inverse
+      text-align="right"
+      wrap="hard"
+    >
+      narrowed props
+    </Text>
+  </Box>
+  <Text wrap="wrap">wrap</Text>
+  <Text wrap="truncate">end truncate</Text>
+  <Text wrap="truncate-middle">middle truncate</Text>
+  <Text wrap="truncate-start">start truncate</Text>
+  <Box flex-direction="row-reverse" :padding-x="1">restored box props</Box>
+  <Box v-show="true"><Text>v-show</Text></Box>
+  <Text v-show="true">text v-show</Text>
+  <Static v-for="(item, index) in [1, 2, 3]" :key="item">
+    <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
+  </Static>
+  <Static>x</Static>
+
+  <!-- @vue-expect-error bold accepts a boolean, not a string -->
+  <Text :bold="'yes'">x</Text>
+  <!-- @vue-expect-error height is a cell count, not a percentage -->
+  <Box height="100%">x</Box>
+  <Box border-style="double">x</Box>
+  <!-- @vue-expect-error an unknown frame name is still rejected -->
+  <Box border-style="hexagon">x</Box>
+  <!-- @vue-expect-error unknown color aliases are not public -->
+  <Text color="grey">x</Text>
+  <!-- @vue-expect-error duplicate end-truncation spelling is not public -->
+  <Text wrap="truncate-end">x</Text>
+  <!-- @vue-expect-error Text alignment accepts only left, center, or right -->
+  <Text text-align="justify">x</Text>
+  <!-- @vue-expect-error legacy foreground reset aliases were replaced by `default` -->
+  <Text color="revert">x</Text>
+  <!-- @vue-expect-error legacy foreground reset aliases were replaced by `default` -->
+  <Text color="initial">x</Text>
+  <!-- @vue-expect-error legacy reset aliases do not apply to the background channel -->
+  <Text background-color="revert">x</Text>
+</template>

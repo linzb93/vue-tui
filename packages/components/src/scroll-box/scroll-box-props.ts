@@ -1,4 +1,4 @@
-import type { ExtractPublicPropTypes } from "vue";
+const rejectedMouseListenerNames = ["onMousedown", "onMouseup", "onClick", "onWheel"] as const;
 
 /**
  * `ScrollBox` takes no props: it is a bounded viewport that follows the bottom
@@ -6,23 +6,51 @@ import type { ExtractPublicPropTypes } from "vue";
  * and wire your own mouse / keyboard to it on the consumer side — the component
  * deliberately ships no built-in input handling (see the decision record).
  */
-export const scrollBoxProps = {};
+export const scrollBoxProps = {
+  // Runtime accepts these keys so ScrollBox can throw one targeted diagnostic;
+  // the public type below rejects them before an application can pass a value.
+  onMousedown: null,
+  onMouseup: null,
+  onClick: null,
+  onWheel: null,
+};
+
+export function assertNoRejectedMouseListeners(rawProps: Record<string, unknown> | null): true {
+  for (const name of rejectedMouseListenerNames) {
+    if (rawProps && Object.prototype.hasOwnProperty.call(rawProps, name)) {
+      throw new Error(
+        `<ScrollBox> does not accept the removed mouse listener "${name}". ` +
+          `Targeted mouse input is outside the current Runtime foundation.`,
+      );
+    }
+  }
+  return true;
+}
 
 /** Props accepted by `<ScrollBox>`. */
-export type ScrollBoxProps = ExtractPublicPropTypes<typeof scrollBoxProps>;
+export interface ScrollBoxProps {
+  readonly onMousedown?: never;
+  readonly onMouseup?: never;
+  readonly onClick?: never;
+  readonly onWheel?: never;
+}
 
 /**
  * Imperative handle exposed by `<ScrollBox>` via `defineExpose`. Grab it with a
  * template ref and drive scrolling from the app. `ScrollBox` listens to no input
  * itself, so the consumer decides how to bind mouse / keyboard to these actions.
+ * Every method returns `true` only when the effective top content line changes
+ * synchronously after flooring and clamping. A `false` result from
+ * `scrollToBottom()` can still re-arm following when the viewport is already at
+ * the bottom.
  */
 export interface ScrollBoxExpose {
-  /** Scroll so content line `line` is at the viewport top (clamped). */
-  scrollToLine(line: number): void;
-  /** Scroll by `lines` relative to the current position (positive = toward the bottom). */
-  scrollByLines(lines: number): void;
+  /** Scroll so finite content line `line` is at the viewport top (floored and clamped). */
+  scrollToLine(line: number): boolean;
+  /** Scroll by a finite number of `lines` (`+` = toward the bottom). */
+  scrollByLines(lines: number): boolean;
   /** Jump to the top. */
-  scrollToTop(): void;
+  scrollToTop(): boolean;
   /** Jump to the bottom and resume following new content. */
-  scrollToBottom(): void;
+  scrollToBottom(): boolean;
 }

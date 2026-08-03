@@ -1,54 +1,34 @@
-import { PassThrough } from "node:stream";
+import { Console as NodeConsole } from "node:console";
 import { nextTick, readonly, type Component } from "vue";
-import { createApp, type MountOptions, type RenderSession, type TuiApp } from "@vue-tui/runtime";
-import {
-  INTERNAL_RENDER_OBSERVER,
-  INTERNAL_SUSPENSION_HOST,
-  INTERNAL_TERMINAL_SIZE_PROBE,
-  createManualSuspensionHost,
-  type InternalRenderObserver,
-} from "@vue-tui/runtime/internal";
+import { createApp, type ColorProfile, type MountOptions, type TuiApp } from "@vue-tui/runtime";
+import { createTestHostBridge, type TestContentFrame } from "@vue-tui/runtime/internal/testing";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
 import { trackHost } from "./cleanup.ts";
 
-export type TestRenderSession = Extract<RenderSession, { readonly host: "live" }>;
-
-export interface TestHost {
+export interface RenderOptions {
   /** Requested production screen model. @default "inline" */
   readonly mode?: NonNullable<MountOptions["mode"]>;
-  /** Renderer presentation. @default "visual" */
-  readonly presentation?: "visual" | "screen-reader";
-  /** Dynamic output cadence. Defaults to live for a TTY and at-teardown for a stream. */
-  readonly updates?: "live" | "at-teardown";
   /** Input stream class. @default "tty" */
   readonly stdin?: "tty" | "non-tty";
   /** Output stream class. @default "tty" */
   readonly stdout?: "tty" | "stream";
-}
-
-export interface RenderOptions {
-  readonly host?: TestHost;
+  /** Styling policy for this render. Omission automatically uses the modeled stdout. */
+  readonly color?: boolean | ColorProfile;
+  /** Route console output through the modeled Runtime writer. @default false */
+  readonly patchConsole?: boolean;
+  /** Exit before delivering an exact Ctrl+C key. @default false */
+  readonly exitOnCtrlC?: boolean;
+  /** Retain renderer commits for `frames` and `lastFrame()`. @default true */
+  readonly retainFrames?: boolean;
   /** Deliberate layout and emulator width. @default 100 */
   readonly columns?: number;
   /** Deliberate emulator height and TTY height. @default 100 */
   readonly rows?: number;
   readonly props?: Record<string, unknown>;
-  readonly exitOnCtrlC?: boolean;
 }
 
-export interface ContentFrame {
-  /**
-   * Current dynamic region as emitted by the renderer. This may contain SGR
-   * styling, but excludes output-writer lifecycle and screen-update controls.
-   */
-  readonly dynamic: string;
-  /**
-   * New `<Static>` content produced by this commit. This may contain SGR
-   * styling, but excludes accumulated replay and output-writer controls.
-   */
-  readonly staticOutput: string;
-}
+export type ContentFrame = TestContentFrame;
 
 export interface Terminal {
   readonly columns: number;
@@ -67,35 +47,34 @@ export interface LastFrameOptions {
 }
 
 export interface RenderResult {
-  /** Deeply readonly production-like facts visible to the component. */
-  readonly session: TestRenderSession;
   /** Runtime-readonly rendering-phase content observations. */
   readonly frames: readonly ContentFrame[];
   lastFrame(this: void, options?: LastFrameOptions): string;
   /** Snapshot terminal state after all currently queued host output. */
   screen(this: void): Promise<ScreenSnapshot>;
   readonly stdin: {
-    write(data: string): Promise<void>;
+    write(data: string | Uint8Array): Promise<void>;
   };
   readonly terminal: Terminal;
   /** Tear down the app while retaining the emulator for restoration assertions. */
   unmount(this: void): void;
   /** Idempotently tear down the app and release every test-host resource. */
   dispose(this: void): void;
-  waitUntilExit(this: void): Promise<unknown>;
+  waitUntilExit(this: void): Promise<void>;
   waitUntilRenderFlush(this: void): Promise<void>;
 }
 
 interface NormalizedTestHost {
   readonly mode: NonNullable<MountOptions["mode"]>;
-  readonly presentation: "visual" | "screen-reader";
-  readonly updates: "live" | "at-teardown";
   readonly stdin: "tty" | "non-tty";
   readonly stdout: {
     readonly kind: "tty" | "stream";
     readonly columns: number;
     readonly rows: number | undefined;
   };
+  readonly patchConsole: boolean;
+  readonly exitOnCtrlC: boolean;
+  readonly color: boolean | ColorProfile;
   readonly emulatorRows: number;
 }
 
@@ -109,94 +88,124 @@ function assertObject(value: unknown, name: string): Record<PropertyKey, unknown
   return value as Record<PropertyKey, unknown>;
 }
 
-function rejectUnknownKeys(
-  value: Record<PropertyKey, unknown>,
-  allowed: readonly string[],
-  name: string,
-): void {
-  const allowedKeys = new Set(allowed);
-  for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) throw new TypeError(`Unknown ${name} option "${key}".`);
-  }
-}
+// Match Runtime's accepted terminal-axis envelope before constructing xterm.
+// This remains private because applications should not branch on an
+// implementation safety limit.
+const MAX_MODELED_TERMINAL_AXIS = 65_535;
+// xterm allocates storage for the complete modeled viewport even when Runtime's
+// Inline renderer would paint only a few rows. Keep that test-only allocation
+// bounded independently from Runtime's paint surface.
+const MAX_MODELED_TERMINAL_CELLS = 1_048_576;
 
 function positiveDimension(value: unknown, name: string): number {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
-  throw new TypeError(`${name} must be a positive safe integer.`);
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${name} must be a positive safe integer.`);
+  }
+  if (value > MAX_MODELED_TERMINAL_AXIS) {
+    throw new RangeError(`${name} must be no greater than ${MAX_MODELED_TERMINAL_AXIS}.`);
+  }
+  return value;
+}
+
+function assertModeledTerminalSurface(columns: number, rows: number): void {
+  if (columns > Math.floor(MAX_MODELED_TERMINAL_CELLS / rows)) {
+    throw new RangeError(
+      `modeled terminal ${columns}x${rows} exceeds the ${MAX_MODELED_TERMINAL_CELLS}-cell test-host limit.`,
+    );
+  }
 }
 
 function dimension(value: unknown, fallback: number, name: string): number {
   return value === undefined ? fallback : positiveDimension(value, name);
 }
 
+function normalizeColorOption(value: unknown): boolean | ColorProfile {
+  if (value === undefined) return true;
+  if (
+    typeof value === "boolean" ||
+    value === "ansi16" ||
+    value === "ansi256" ||
+    value === "truecolor"
+  ) {
+    return value;
+  }
+  throw new TypeError(
+    'render option "color" must be a boolean, "ansi16", "ansi256", "truecolor", or undefined.',
+  );
+}
+
 function normalizeOptions(options: RenderOptions): {
   readonly props: Record<string, unknown> | undefined;
-  readonly exitOnCtrlC: boolean;
+  readonly retainFrames: boolean;
   readonly host: NormalizedTestHost;
 } {
   const root = assertObject(options, "render options");
-  for (const removed of ["liveUpdates", "debug"] as const) {
-    if (hasOwn(root, removed)) {
-      throw new TypeError(`render option "${removed}" was removed; configure the modeled host.`);
-    }
+  // The only runtime option check here. `RenderOptions` is the contract, and
+  // TypeScript already rejects an unknown key on a literal, so a closed-key guard
+  // would mostly restate the type. `debug` is the exception worth the code: Ink
+  // has that option, so an Ink user reaches for it, and TypeScript can only say
+  // it does not exist rather than what to use instead.
+  if (hasOwn(root, "debug")) {
+    throw new TypeError(
+      'render option "debug" was removed. It changed the bytes the application wrote, so a test ' +
+        "could not observe production output. Read `frames` / `lastFrame()` for rendered content " +
+        "and `await screen()` for the emulated terminal instead; both leave the byte stream intact.",
+    );
   }
-  rejectUnknownKeys(root, ["host", "columns", "rows", "props", "exitOnCtrlC"], "render");
-
   // Snapshot each accessor once. Validation and construction must use the same
   // value so a stateful getter cannot pass one check and mount with another.
-  const hostOption = root.host;
   const columnsOption = root.columns;
   const rowsOption = root.rows;
   const propsOption = root.props;
+  const modeOption = root.mode;
+  const stdinOption = root.stdin;
+  const stdoutOption = root.stdout;
+  const colorOption = root.color;
+  const patchConsoleOption = root.patchConsole;
   const exitOnCtrlCOption = root.exitOnCtrlC;
-
-  const host = hostOption === undefined ? {} : assertObject(hostOption, "render host");
-  rejectUnknownKeys(host, ["mode", "presentation", "updates", "stdin", "stdout"], "render host");
-  const modeOption = host.mode;
-  const presentationOption = host.presentation;
-  const updatesOption = host.updates;
-  const stdinOption = host.stdin;
-  const stdoutOption = host.stdout;
+  const retainFramesOption = root.retainFrames;
 
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
-    throw new TypeError('render host mode must be "inline" or "fullscreen".');
-  }
-  const presentation = presentationOption === undefined ? "visual" : presentationOption;
-  if (presentation !== "visual" && presentation !== "screen-reader") {
-    throw new TypeError('render host presentation must be "visual" or "screen-reader".');
+    throw new TypeError('render option "mode" must be "inline" or "fullscreen".');
   }
   const stdin = stdinOption === undefined ? "tty" : stdinOption;
   if (stdin !== "tty" && stdin !== "non-tty") {
-    throw new TypeError('render host stdin must be "tty" or "non-tty".');
+    throw new TypeError('render option "stdin" must be "tty" or "non-tty".');
   }
 
   const kind = stdoutOption === undefined ? "tty" : stdoutOption;
   if (kind !== "tty" && kind !== "stream") {
-    throw new TypeError('render host stdout must be "tty" or "stream".');
+    throw new TypeError('render option "stdout" must be "tty" or "stream".');
   }
   const columns = dimension(columnsOption, 100, "render columns");
   const emulatorRows = dimension(rowsOption, 100, "render rows");
+  assertModeledTerminalSurface(columns, emulatorRows);
   const rows = kind === "tty" ? emulatorRows : undefined;
-  const updates =
-    updatesOption === undefined ? (kind === "tty" ? "live" : "at-teardown") : updatesOption;
-  if (updates !== "live" && updates !== "at-teardown") {
-    throw new TypeError('render host updates must be "live" or "at-teardown".');
+  const patchConsole = patchConsoleOption === undefined ? false : patchConsoleOption;
+  if (typeof patchConsole !== "boolean") {
+    throw new TypeError('render option "patchConsole" must be a boolean.');
   }
-  if (exitOnCtrlCOption !== undefined && typeof exitOnCtrlCOption !== "boolean") {
-    throw new TypeError("render option exitOnCtrlC must be a boolean or undefined.");
+  const exitOnCtrlC = exitOnCtrlCOption === undefined ? false : exitOnCtrlCOption;
+  if (typeof exitOnCtrlC !== "boolean") {
+    throw new TypeError('render option "exitOnCtrlC" must be a boolean.');
+  }
+  const retainFrames = retainFramesOption === undefined ? true : retainFramesOption;
+  if (typeof retainFrames !== "boolean") {
+    throw new TypeError('render option "retainFrames" must be a boolean.');
   }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
 
   return {
     props: propsOption as Record<string, unknown> | undefined,
-    exitOnCtrlC: (exitOnCtrlCOption as boolean | undefined) ?? false,
+    retainFrames,
     host: {
       mode,
-      presentation,
-      updates,
       stdin,
       stdout: { kind, columns, rows },
+      patchConsole,
+      exitOnCtrlC,
+      color: normalizeColorOption(colorOption),
       emulatorRows,
     },
   };
@@ -210,12 +219,36 @@ function trimFrame(raw: string): string {
     .trimEnd();
 }
 
+/**
+ * Mount a component against a finite modeled terminal host for tests.
+ *
+ * - `frames` and `lastFrame()` are renderer content commits — styling, no control
+ *   sequences. `screen()` is the emulated cell surface. Assert the one you mean.
+ * - Options are flat; omitting them models an Inline TTY at 100x100.
+ * - `unmount()` keeps the emulator readable for restoration assertions;
+ *   `dispose()` releases everything and is idempotent.
+ *
+ * @example Drive a component through input
+ * ```ts
+ * const result = await render(Counter);
+ * await result.stdin.write("+");
+ * expect(result.lastFrame()).toContain("Count: 1");
+ * result.dispose();
+ * ```
+ *
+ * @example Assert terminal restoration in Fullscreen
+ * ```ts
+ * const result = await render(App, { mode: "fullscreen", columns: 40, rows: 10 });
+ * result.unmount();
+ * expect((await result.screen()).cursor.visible).toBe(true);
+ * ```
+ */
 export async function render(
   component: Component,
   options: RenderOptions = {},
 ): Promise<RenderResult> {
   const normalized = normalizeOptions(options);
-  const { host } = normalized;
+  const { host, retainFrames } = normalized;
   const stdout = makeFakeWritable({
     isTTY: host.stdout.kind === "tty",
     columns: host.stdout.columns,
@@ -231,23 +264,15 @@ export async function render(
   const emulator = createTerminalEmulator(host.stdout.columns, host.emulatorRows, {
     convertEol: host.stdout.kind === "tty",
   });
-  const suspensionHost = createManualSuspensionHost();
   const forwardOutput = (chunk: Buffer | string) => emulator.write(chunk);
   stdout.on("data", forwardOutput);
   stderr.on("data", forwardOutput);
 
   const frames: ContentFrame[] = [];
   const publicFrames = readonly(frames) as readonly ContentFrame[];
-  let session: TestRenderSession | undefined;
-  const observer: InternalRenderObserver = {
-    onSession(value) {
-      session = value;
-    },
-    onCommit(commit) {
-      if (commit.phase === "teardown") return;
-      frames.push(Object.freeze({ dynamic: commit.dynamic, staticOutput: commit.staticOutput }));
-    },
-  };
+  const bridge = createTestHostBridge(
+    retainFrames ? { onFrame: (frame) => frames.push(frame) } : {},
+  );
 
   const app: TuiApp = createApp(component, normalized.props);
   let resourcesDisposed = false;
@@ -280,6 +305,14 @@ export async function render(
     app.unmount();
   };
   let disposed = false;
+  let resourcesDisposal: Promise<void> | undefined;
+  const disposeResourcesAfterExit = () => {
+    resourcesDisposal ??= app.waitUntilExit().then(
+      () => disposeResources(),
+      () => disposeResources(),
+    );
+    void resourcesDisposal.catch(() => undefined);
+  };
   let untrack: () => void = () => undefined;
   const dispose = () => {
     if (disposed) return;
@@ -291,16 +324,27 @@ export async function render(
       errors.push(error);
     }
     untrack();
-    try {
-      disposeResources();
-    } catch (error) {
-      errors.push(error);
-    }
+    disposeResourcesAfterExit();
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw new AggregateError(errors, "Failed to dispose the test host.");
   };
   const assertActive = () => {
     if (disposed) throw new Error("Test host has been disposed.");
+  };
+  const flushEmulatorWhileAvailable = async (): Promise<void> => {
+    if (disposed) return;
+    try {
+      await emulator.flush();
+    } catch (error) {
+      // A waitUntilExit() call may already be waiting when test cleanup
+      // disposes the host. Preserve the Runtime exit outcome instead of
+      // replacing it with the emulator's later disposal error.
+      if (disposed) return;
+      throw error;
+    }
+  };
+  const settleRuntimeRender = async (): Promise<void> => {
+    await app.waitUntilRenderFlush();
   };
   const failAfterDispose = (error: unknown): never => {
     try {
@@ -315,20 +359,30 @@ export async function render(
   };
 
   try {
-    app.mount({
-      stdout,
-      stdin,
-      stderr,
-      mode: host.mode,
-      liveUpdates: host.updates === "live",
-      isScreenReaderEnabled: host.presentation === "screen-reader",
-      exitOnCtrlC: normalized.exitOnCtrlC,
-      patchConsole: false,
-      maxFps: 0,
-      [INTERNAL_RENDER_OBSERVER]: observer,
-      [INTERNAL_SUSPENSION_HOST]: suspensionHost,
-      [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
-    } as Parameters<TuiApp["mount"]>[0]);
+    const consoleDescriptor = Object.getOwnPropertyDescriptor(console, "Console");
+    if (host.patchConsole && typeof (console as { Console?: unknown }).Console !== "function") {
+      Object.defineProperty(console, "Console", {
+        configurable: true,
+        writable: true,
+        value: NodeConsole,
+      });
+    }
+    try {
+      bridge.mount(app, {
+        stdout,
+        stdin,
+        stderr,
+        mode: host.mode,
+        color: host.color,
+        patchConsole: host.patchConsole,
+        exitOnCtrlC: host.exitOnCtrlC,
+      });
+    } finally {
+      if (host.patchConsole) {
+        if (consoleDescriptor) Object.defineProperty(console, "Console", consoleDescriptor);
+        else Reflect.deleteProperty(console, "Console");
+      }
+    }
   } catch (error) {
     failAfterDispose(error);
   }
@@ -347,19 +401,13 @@ export async function render(
     await Promise.resolve();
     await new Promise<void>((resolve) => setImmediate(resolve));
     await Promise.resolve();
-    await app.waitUntilRenderFlush();
+    await settleRuntimeRender();
     await emulator.flush();
 
     if (earlyError) throw earlyError;
-    if (!session) {
-      throw new Error("The deterministic render host did not receive a render session.");
-    }
   } catch (error) {
     failAfterDispose(error);
   }
-  const resolvedSession: TestRenderSession =
-    session ??
-    failAfterDispose(new Error("The deterministic render host did not receive a render session."));
 
   let emulatorColumns = host.stdout.columns;
   let emulatorRows = host.emulatorRows;
@@ -374,6 +422,7 @@ export async function render(
       assertActive();
       const nextColumns = positiveDimension(columns, "terminal columns");
       const nextRows = positiveDimension(rows, "terminal rows");
+      assertModeledTerminalSurface(nextColumns, nextRows);
       await emulator.resize(nextColumns, nextRows);
       assertActive();
       emulatorColumns = nextColumns;
@@ -382,22 +431,23 @@ export async function render(
       if (host.stdout.kind === "tty") stdout.rows = nextRows;
       stderr.columns = nextColumns;
       if (host.stdout.kind === "tty") stderr.rows = nextRows;
-      (stdout as unknown as PassThrough).emit("resize");
+      if (unmounted) return;
+      stdout.emit("resize");
       await nextTick();
-      await app.waitUntilRenderFlush();
+      if (unmounted) return;
+      await settleRuntimeRender();
       await emulator.flush();
     },
     async suspend() {
       assertActive();
-      await suspensionHost.suspend();
+      await bridge.suspend();
       await emulator.flush();
     },
     async resume() {
       assertActive();
-      await suspensionHost.resume();
-      await nextTick();
-      await app.waitUntilRenderFlush();
+      await bridge.resume();
       await emulator.flush();
+      assertActive();
     },
     rawMode: publicRawMode,
   };
@@ -410,7 +460,6 @@ export async function render(
   };
 
   return {
-    session: resolvedSession,
     frames: publicFrames,
     lastFrame: (frameOptions?: LastFrameOptions) => {
       const frame = frames.at(-1)?.dynamic ?? "";
@@ -425,26 +474,26 @@ export async function render(
     },
     screen: async () => {
       assertActive();
-      return await emulator.snapshot();
+      const snapshot = await emulator.snapshot();
+      assertActive();
+      return snapshot;
     },
     stdin: {
-      async write(data: string): Promise<void> {
+      async write(data: string | Uint8Array): Promise<void> {
         assertActive();
-        stdin.emit("data", data);
-        await nextTick();
-        await new Promise((resolve) => setTimeout(resolve, 30));
-        await nextTick();
-        await waitUntilRenderFlush();
+        await bridge.writeInput(data);
+        await emulator.flush();
       },
     },
     terminal,
     unmount,
     dispose,
     async waitUntilExit() {
+      assertActive();
       try {
         return await app.waitUntilExit();
       } finally {
-        await emulator.flush();
+        await flushEmulatorWhileAvailable();
       }
     },
     waitUntilRenderFlush,
